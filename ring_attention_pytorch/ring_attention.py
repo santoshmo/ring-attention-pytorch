@@ -11,6 +11,8 @@ from einops import rearrange, repeat
 
 from beartype import beartype
 
+from ring_attention_pytorch.blockwise_parallel_moe import BlockwiseMoE
+
 from ring_attention_pytorch.ring import (
     all_ring_pass,
     is_distributed,
@@ -363,6 +365,7 @@ class RingAttention(Module):
             nn.Linear(dim, dim_inner + (dim_kv_inner * 2), bias = False)
         )
 
+        # TODO(santoshmohan): Add support for mixture of experts w/ expert's choice. 
         self.to_out = nn.Linear(dim_inner, dim, bias = False)
 
     def forward(
@@ -485,6 +488,19 @@ def FeedForward(dim, mult = 4):
         nn.Linear(dim_inner, dim)
     )
 
+def MoE(dim, num_experts, capacity_factor, min_capacity=1, mult=4):
+    dim_inner = int(dim * mult)
+    return nn.Sequential(
+        RMSNorm(dim),
+        BlockwiseMoE(
+            dim = dim,
+            dim_inner = dim_inner,
+            num_experts = num_experts,
+            capacity_factor = capacity_factor,
+            min_capacity = min_capacity
+        )
+    )
+
 class RingTransformer(Module):
     @beartype
     def __init__(
@@ -494,6 +510,7 @@ class RingTransformer(Module):
         dim: int,
         depth: int,
         causal: bool = False,
+        moe: bool = False,
         dim_head: int = 64,
         heads: int = 8,
         ff_mult: int = 4,
@@ -546,7 +563,7 @@ class RingTransformer(Module):
         max_lookback_seq_len = cast_tuple(max_lookback_seq_len, depth)
         assert len(max_lookback_seq_len) == depth
 
-        for layer_max_lookback_seq_len in max_lookback_seq_len:
+        for i, layer_max_lookback_seq_len in enumerate(max_lookback_seq_len):
 
             self.layers.append(ModuleList([
                 RingAttention(
@@ -564,7 +581,9 @@ class RingTransformer(Module):
                     use_cuda_kernel = self.use_cuda_kernel,
                     auto_shard_seq = False,
                 ),
-                FeedForward(dim = dim, mult = ff_mult)
+                MoE(dim, 8,1,1,ff_mult)
+                if i % 2 == 0 and moe else \
+                    FeedForward(dim = dim, mult = ff_mult)
             ]))
 
         self.to_logits = nn.Sequential(
@@ -652,7 +671,7 @@ class RingTransformer(Module):
                 mask = mask,
                 rotary_emb = rotary_emb,
                 force_ring_reduce_off = force_ring_reduce_off,
-                ring_size = ring_size
+                ring_size = ring_size, 
             ) + x
 
             x = ff(x) + x
