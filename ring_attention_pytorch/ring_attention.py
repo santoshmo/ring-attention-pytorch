@@ -11,7 +11,7 @@ from einx import rearrange
 
 from beartype import beartype
 
-from ring_attention_pytorch.blockwise_parallel_moe import BlockwiseMoE
+from ring_attention_pytorch.blockwise_parallel_moe import BlockwiseParallelMoE
 
 from ring_attention_pytorch.ring import (
     all_ring_pass,
@@ -302,7 +302,6 @@ class RingAttention(Module):
             nn.Linear(dim, dim_inner * 3, bias = False)
         )
 
-        # TODO(santoshmohan): Add support for mixture of experts w/ expert's choice. 
         self.to_out = nn.Linear(dim_inner, dim, bias = False)
 
         # whether to use flash attention cuda kernel
@@ -426,7 +425,7 @@ def MoE(dim, num_experts, capacity_factor, min_capacity=1, mult=4):
     dim_inner = int(dim * mult)
     return nn.Sequential(
         RMSNorm(dim),
-        BlockwiseMoE(
+        BlockwiseParallelMoE(
             dim = dim,
             dim_inner = dim_inner,
             num_experts = num_experts,
@@ -503,7 +502,7 @@ class RingTransformer(Module):
                 ),
                 MoE(dim, 8,1,1,ff_mult)
                 if i % 2 == 0 and moe else \
-                    FeedForward(dim = dim, mult = ff_mult)
+                    FeedForward(dim, ff_mult)
             ]))
 
         self.to_logits = nn.Sequential(

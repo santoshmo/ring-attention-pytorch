@@ -1,10 +1,10 @@
 import torch
-from torch import nn, ceil, topk, matmul
+from torch import nn
 from math import ceil
 
-class BlockwiseMoE(nn.Module):
+class BlockwiseParallelMoE(nn.Module):
     def __init__(self, dim, dim_inner, num_experts, capacity_factor, min_capacity):
-        super(BlockwiseMoE, self).__init__()
+        super(BlockwiseParallelMoE, self).__init__()
         self.dim = dim
         self.num_experts = num_experts
         self.dim_inner = dim_inner
@@ -32,7 +32,7 @@ class BlockwiseMoE(nn.Module):
     def _expert_choice_routing(self, x, num_tokens):
         k = self._capacity(num_tokens)
         S = self._router(x)
-        G, topk_idx = topk(S.T, k, dim=1)
+        G, topk_idx = torch.topk(S.T, k, dim=1)
         P = nn.functional.one_hot(topk_idx, num_tokens).to(dtype=torch.float32) # e x k x n
         X_in = torch.matmul(P, x)
         return G, P, X_in
