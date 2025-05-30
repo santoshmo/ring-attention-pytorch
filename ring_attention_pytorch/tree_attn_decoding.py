@@ -27,7 +27,8 @@ def tree_attn_decode(
     v: Float['b h n dv'] | None = None,
     eps = 1e-8,
     shard_kv_seq = True,
-    use_triton = None
+    use_triton = None,
+    use_cuda_kernel: bool = False
 ) -> Float['b h 1 dv']:
 
     q_prec_dims, dtype = q.shape[:-1], q.dtype
@@ -54,10 +55,17 @@ def tree_attn_decode(
     if exists(k):
         # calculate local output and lse
 
-        use_triton = default(use_triton, q.is_cuda)
+        # decide which implementation to use for the local attention
+        use_triton = default(use_triton, q.is_cuda and not use_cuda_kernel)
+
         assert not (use_triton and not q.is_cuda), 'input needs to be on cuda if forcing the use of triton'
 
-        if use_triton and q.is_cuda:
+        if use_cuda_kernel:
+            from ring_attention_pytorch.tree_attn_cuda import tree_attn_decode_cuda
+
+            local_out, lse = tree_attn_decode_cuda(q, k, v)
+
+        elif use_triton and q.is_cuda:
             from ring_attention_pytorch.triton_flash_attn import flash_attn_forward
 
             local_out, _, lse = flash_attn_forward(
@@ -94,10 +102,21 @@ def tree_attn_decode(
     den = (lse - max_lse).exp()
     num = local_out * den
 
-    # second and third all reduce (sum)
+    # concatenate denominator and numerator so they can share one all_reduce
 
-    dist.all_reduce(den)
-    dist.all_reduce(num)
+    # shapes: den -> (..., 1), num -> (..., dv)
+    # we cast num to same dtype as den to avoid dtype mismatch across ranks
+
+    if num.dtype != den.dtype:
+        num = num.to(den.dtype)
+
+    den_num = torch.cat((den, num), dim = -1)  # (..., 1 + dv)
+
+    # single communication – sum across ranks
+    dist.all_reduce(den_num)
+
+    # split back
+    den, num = den_num.split([1, den_num.shape[-1] - 1], dim = -1)
 
     out = num.div_(den.clamp(min = eps))
 

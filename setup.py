@@ -1,4 +1,6 @@
 from setuptools import setup, find_packages
+from torch.utils.cpp_extension import BuildExtension, CUDAExtension
+import pybind11
 
 setup(
   name = 'ring-attention-pytorch',
@@ -21,6 +23,24 @@ setup(
     'jaxtyping',
     'torch>=2.0',
   ],
+  ext_modules=[
+    CUDAExtension(
+      name='ring_attention_pytorch._tree_attn_cuda_ext',
+      sources=[
+        'ring_attention_pytorch/csrc/tree_attn_cuda.cpp',
+        'ring_attention_pytorch/csrc/tree_attn_cuda_kernel.cu',
+        'ring_attention_pytorch/csrc/tree_attn_cuda_kernel_fused.cu',
+      ],
+      include_dirs=[pybind11.get_include()],
+      extra_compile_args={
+        'cxx': ['-O3'],
+        'nvcc': ['-O3']
+      }
+    )
+  ],
+  cmdclass={
+    'build_ext': BuildExtension
+  },
   classifiers=[
     'Development Status :: 4 - Beta',
     'Intended Audience :: Developers',

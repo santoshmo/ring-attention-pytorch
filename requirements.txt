@@ -1,2 +1,5 @@
 click>=8.0
 ring-attention-pytorch
+pybind11>=2.11
+ninja
+pytest
