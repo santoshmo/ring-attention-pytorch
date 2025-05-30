@@ -31,6 +31,7 @@ from ring_attention_pytorch.tree_attn_cuda import tree_attn_decode_cuda
 from ring_attention_pytorch.tree_attn_decoding import _hierarchical_all_reduce
 
 EPS = 1e-8
+MICRO_Q = 4
 
 
 class TreeAttnPipeline:
@@ -131,12 +132,17 @@ class TreeAttnPipeline:
     # ------------------------------------------------------------------
     @torch.no_grad()
     def run_chunk(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
-        """Process a chunk with shape (B,H,T_q,D), return same-shaped output."""
-        assert q.ndim == 4 and q.shape[2] > 0, "q must be (B,H,T_q,D) with T_q>0"
+        """q : (B H T_q D)  →  returns same-shaped output."""
+        B, H, T_q, D = q.shape
         outs = []
-        for t in range(q.shape[2]):
-            ready = self.step(q[:, :, t:t+1, :], k, v)
-            if ready is not None:
-                outs.append(ready)
+        for start in range(0, T_q, MICRO_Q):
+            q_tile = q[:, :, start:start + MICRO_Q, :].contiguous()   # ≤4 rows
+            out_tile = tree_attn_decode_cuda(q_tile, k, v, fused=True)[0]  # local
+            # all-reduce once per row inside the tile
+            for t in range(out_tile.shape[2]):
+                out_ready = self.step(out_tile[:, :, t:t+1, :],
+                                      k, v)          # overlap comm
+                if out_ready is not None:
+                    outs.append(out_ready)
         outs.append(self.finalize())
         return torch.cat(outs, dim=2) 
