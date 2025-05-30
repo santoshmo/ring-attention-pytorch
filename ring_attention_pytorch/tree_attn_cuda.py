@@ -1,10 +1,12 @@
 import os
+import math
 from pathlib import Path
 from typing import Tuple
 
 import torch
 from torch.utils.cpp_extension import load
 import pybind11
+import flash_attn
 
 # Directory setup -----------------------------------------------------------
 _CUDA_SRC_DIR = Path(__file__).parent / "csrc"
@@ -12,6 +14,23 @@ _sources = [
     str(_CUDA_SRC_DIR / "tree_attn_cuda.cpp"),
     str(_CUDA_SRC_DIR / "tree_attn_cuda_kernel.cu"),
 ]
+
+FA_MOD_ROOT = Path(__file__).parent / "third_party" / "flash_attn_mod"
+FA_HDR3     = FA_MOD_ROOT / "csrc" / "flash_attn" / "src"
+
+# derive header locations from flash_attn wheel (if installed)
+flash_root = Path(flash_attn.__file__).parent
+flash_hdr1 = flash_root / "src"
+flash_hdr2 = flash_root / "flash_attn_core" / "include"
+
+extra_include_paths = [
+    pybind11.get_include(),
+    str(flash_root), str(flash_hdr1), str(flash_hdr2),
+    str(FA_MOD_ROOT / "csrc"), str(FA_MOD_ROOT / "src"),
+    str(FA_MOD_ROOT / "flash_attn_core" / "include"),
+    str(FA_HDR3),
+]
+# remove extra _sources entry; kernels come via headers
 
 # Build / load extension (lazy) -------------------------------------------
 
@@ -25,7 +44,7 @@ def _load_ext():
             sources=_sources,
             extra_cflags=["-O3"],
             extra_cuda_cflags=["-O3"],
-            extra_include_paths=[pybind11.get_include()],
+            extra_include_paths=extra_include_paths,
             verbose=False,
         )
     return _extension

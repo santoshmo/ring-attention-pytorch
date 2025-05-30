@@ -10,6 +10,56 @@ from ring_attention_pytorch.distributed import get_rank, get_world_size
 
 from ring_attention_pytorch.tensor_typing import Float
 
+import socket
+
+# -----------------------------------------------------------------------------
+# Hierarchical collectives (intra-node then inter-node)
+# -----------------------------------------------------------------------------
+
+_LOCAL_GROUP = None
+_LEADER_GROUP = None
+_LOCAL_LEADER_RANK = None
+_IS_LOCAL_LEADER = False
+
+
+def _init_hierarchical_groups():
+    global _LOCAL_GROUP, _LEADER_GROUP, _LOCAL_LEADER_RANK, _IS_LOCAL_LEADER
+    if _LOCAL_GROUP is not None or not dist.is_initialized() or dist.get_world_size() == 1:
+        return
+
+    rank = dist.get_rank()
+    world = dist.get_world_size()
+    host = socket.gethostname()
+    hosts = [None] * world
+    dist.all_gather_object(hosts, host)
+
+    host_to_ranks = {}
+    for r, h in enumerate(hosts):
+        host_to_ranks.setdefault(h, []).append(r)
+
+    local_ranks = host_to_ranks[host]
+    _LOCAL_GROUP = dist.new_group(ranks=local_ranks)
+    _LOCAL_LEADER_RANK = min(local_ranks)
+    _IS_LOCAL_LEADER = (rank == _LOCAL_LEADER_RANK)
+
+    leader_ranks = sorted({min(ranks) for ranks in host_to_ranks.values()})
+    if len(leader_ranks) > 1:
+        _LEADER_GROUP = dist.new_group(ranks=leader_ranks)
+    else:
+        _LEADER_GROUP = None
+
+
+def _hierarchical_all_reduce(t: torch.Tensor, op=dist.ReduceOp.SUM):
+    if not dist.is_initialized() or dist.get_world_size() == 1:
+        return t
+    _init_hierarchical_groups()
+    dist.all_reduce(t, op=op, group=_LOCAL_GROUP)
+    if _LEADER_GROUP is not None:
+        if _IS_LOCAL_LEADER:
+            dist.all_reduce(t, op=op, group=_LEADER_GROUP)
+        dist.broadcast(t, src=_LOCAL_LEADER_RANK, group=_LOCAL_GROUP)
+    return t
+
 # functions
 
 def exists(v):
@@ -92,32 +142,21 @@ def tree_attn_decode(
         local_out = q.new_zeros((*q_prec_dims, dim_v), dtype = torch.float32)
         lse = torch.full((*q_prec_dims, 1), -torch.finfo(torch.float32).max, device = q.device, dtype = torch.float32)
 
-    # first get max(lse) through an all reduce
-
+    # first get global max(lse)
     max_lse = lse.clone()
-    dist.all_reduce(max_lse, dist.ReduceOp.MAX)
+    _hierarchical_all_reduce(max_lse, op=dist.ReduceOp.MAX)
 
-    # derive numerator and denominator
+    # derive numerator and denominator locally
+    den = (lse - max_lse).exp()             # fp32 single element
+    num = local_out * den                  # fp32 D elements
 
-    den = (lse - max_lse).exp()
-    num = local_out * den
+    # mixed-precision comms: bf16 numerator
+    num_bf16 = num.to(torch.bfloat16)
 
-    # concatenate denominator and numerator so they can share one all_reduce
+    _hierarchical_all_reduce(den)
+    _hierarchical_all_reduce(num_bf16)
 
-    # shapes: den -> (..., 1), num -> (..., dv)
-    # we cast num to same dtype as den to avoid dtype mismatch across ranks
-
-    if num.dtype != den.dtype:
-        num = num.to(den.dtype)
-
-    den_num = torch.cat((den, num), dim = -1)  # (..., 1 + dv)
-
-    # single communication – sum across ranks
-    dist.all_reduce(den_num)
-
-    # split back
-    den, num = den_num.split([1, den_num.shape[-1] - 1], dim = -1)
-
-    out = num.div_(den.clamp(min = eps))
+    num = num_bf16.to(torch.float32)
+    out = num.div_(den.clamp(min=eps))
 
     return out.type(dtype)
