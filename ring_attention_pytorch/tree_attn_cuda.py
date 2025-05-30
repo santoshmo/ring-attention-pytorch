@@ -6,7 +6,14 @@ from typing import Tuple
 import torch
 from torch.utils.cpp_extension import load
 import pybind11
-import flash_attn
+# FlashAttention import (optional)
+try:
+    import flash_attn
+    from flash_attn.flash_attn_interface import flash_attn_func  # type: ignore
+    _HAS_FLASH_ATTN = True
+except Exception:
+    _HAS_FLASH_ATTN = False
+    flash_attn = None
 
 # Directory setup -----------------------------------------------------------
 _CUDA_SRC_DIR = Path(__file__).parent / "csrc"
@@ -17,6 +24,7 @@ _sources = [
 
 FA_MOD_ROOT = Path(__file__).parent / "third_party" / "flash_attn_mod"
 FA_HDR3     = FA_MOD_ROOT / "csrc" / "flash_attn" / "src"
+FA_HDR4 = FA_MOD_ROOT / "csrc" / "flash_attn"
 
 # derive header locations from flash_attn wheel (if installed)
 flash_root = Path(flash_attn.__file__).parent
@@ -29,6 +37,7 @@ extra_include_paths = [
     str(FA_MOD_ROOT / "csrc"), str(FA_MOD_ROOT / "src"),
     str(FA_MOD_ROOT / "flash_attn_core" / "include"),
     str(FA_HDR3),
+    str(FA_HDR4),
 ]
 # remove extra _sources entry; kernels come via headers
 
@@ -64,11 +73,27 @@ def tree_attn_decode_cuda(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, *, 
       k : (B, H, N, D)
       v : (B, H, N, D)
     """
-    ext = _load_ext()
     if fused:
-        # placeholder: fused kernel not wired yet
-        print("[tree_attn_cuda] fused=True – fused kernel not yet implemented, falling back")
-    out, lse = ext.forward(q, k, v)
+        if not _HAS_FLASH_ATTN:
+            raise RuntimeError("flash-attn>=2 not available – install it or set fused=False")
+
+        B, H, _, D = q.shape
+        k_seq = k.size(2)
+
+        q_fa = q.permute(0, 2, 1, 3).contiguous()  # (B,1,H,D)
+        k_fa = k.permute(0, 2, 1, 3).contiguous()
+        v_fa = v.permute(0, 2, 1, 3).contiguous()
+
+        out_fa = flash_attn_func(q_fa, k_fa, v_fa, 0.0, causal=False)  # (B,1,H,D)
+        out = out_fa.permute(0, 2, 1, 3).contiguous()
+
+        scale = 1.0 / math.sqrt(D)
+        logits = torch.einsum("bhid,bhjd->bhij", q.to(torch.float32)*scale, k.to(torch.float32)).squeeze(2)
+        lse = torch.logsumexp(logits, dim=-1, keepdim=True)
+    else:
+        ext = _load_ext()
+        out, lse = ext.forward(q, k, v)
+
     if out.dtype != q.dtype:
         out = out.to(q.dtype)
     return out, lse 
