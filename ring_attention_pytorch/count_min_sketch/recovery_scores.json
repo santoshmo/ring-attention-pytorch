@@ -1,0 +1,155 @@
+[
+  {
+    "layer": 1,
+    "overlap": 16,
+    "score": 1.0,
+    "l2_error": 1.7548828125,
+    "max_abs_error": 1.5703125,
+    "mass_check": true,
+    "candidate_size": 64
+  },
+  {
+    "layer": 2,
+    "overlap": 16,
+    "score": 1.0,
+    "l2_error": 7.24609375,
+    "max_abs_error": 5.25,
+    "mass_check": true,
+    "candidate_size": 64
+  },
+  {
+    "layer": 3,
+    "overlap": 16,
+    "score": 1.0,
+    "l2_error": 6.36328125,
+    "max_abs_error": 3.919921875,
+    "mass_check": true,
+    "candidate_size": 64
+  },
+  {
+    "layer": 4,
+    "overlap": 16,
+    "score": 1.0,
+    "l2_error": 5.26953125,
+    "max_abs_error": 0.98193359375,
+    "mass_check": true,
+    "candidate_size": 64
+  },
+  {
+    "layer": 5,
+    "overlap": 16,
+    "score": 1.0,
+    "l2_error": 5.3828125,
+    "max_abs_error": 0.89892578125,
+    "mass_check": true,
+    "candidate_size": 64
+  },
+  {
+    "layer": 6,
+    "overlap": 16,
+    "score": 1.0,
+    "l2_error": 7.5,
+    "max_abs_error": 5.08203125,
+    "mass_check": true,
+    "candidate_size": 64
+  },
+  {
+    "layer": 7,
+    "overlap": 16,
+    "score": 1.0,
+    "l2_error": 6.9140625,
+    "max_abs_error": 4.0078125,
+    "mass_check": true,
+    "candidate_size": 64
+  },
+  {
+    "layer": 8,
+    "overlap": 16,
+    "score": 1.0,
+    "l2_error": 7.88671875,
+    "max_abs_error": 5.38671875,
+    "mass_check": true,
+    "candidate_size": 64
+  },
+  {
+    "layer": 9,
+    "overlap": 16,
+    "score": 1.0,
+    "l2_error": 10.609375,
+    "max_abs_error": 9.0,
+    "mass_check": true,
+    "candidate_size": 64
+  },
+  {
+    "layer": 10,
+    "overlap": 15,
+    "score": 0.9375,
+    "l2_error": 9.7265625,
+    "max_abs_error": 7.7421875,
+    "mass_check": true,
+    "candidate_size": 64
+  },
+  {
+    "layer": 11,
+    "overlap": 15,
+    "score": 0.9375,
+    "l2_error": 12.8828125,
+    "max_abs_error": 11.3515625,
+    "mass_check": true,
+    "candidate_size": 64
+  },
+  {
+    "layer": 12,
+    "overlap": 15,
+    "score": 0.9375,
+    "l2_error": 15.7421875,
+    "max_abs_error": 14.421875,
+    "mass_check": true,
+    "candidate_size": 64
+  },
+  {
+    "layer": 13,
+    "overlap": 15,
+    "score": 0.9375,
+    "l2_error": 17.0,
+    "max_abs_error": 15.5078125,
+    "mass_check": true,
+    "candidate_size": 64
+  },
+  {
+    "layer": 14,
+    "overlap": 16,
+    "score": 1.0,
+    "l2_error": 20.625,
+    "max_abs_error": 18.96875,
+    "mass_check": true,
+    "candidate_size": 64
+  },
+  {
+    "layer": 15,
+    "overlap": 14,
+    "score": 0.875,
+    "l2_error": 21.46875,
+    "max_abs_error": 15.3671875,
+    "mass_check": true,
+    "candidate_size": 64
+  },
+  {
+    "layer": 16,
+    "overlap": 14,
+    "score": 0.875,
+    "l2_error": 53.4375,
+    "max_abs_error": 31.796875,
+    "mass_check": true,
+    "candidate_size": 64
+  },
+  {
+    "layer": 17,
+    "overlap": 5,
+    "score": 0.3125,
+    "l2_error": 106.5,
+    "max_abs_error": 83.625,
+    "mass_check": false,
+    "candidate_size": 64
+  }
+]
