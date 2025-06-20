@@ -27,11 +27,22 @@ from typing import List, Dict, Any
 
 import torch
 import torch.nn.functional as F
-from transformers import AutoTokenizer  # type: ignore
+from transformers import AutoTokenizer, AutoModelForCausalLM  # type: ignore
+import os
+import sys
+
+# Ensure project root (two levels up) is on PYTHONPATH when run directly
+_project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir, os.pardir))
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)  # allow 'ring_attention_pytorch' absolute imports
 
 # Import CountSketch from sibling file (same directory)
-from .test_flash_tree_sketch import CountSketch  # re-use implementation
-from .llama_model import LlamaModel
+try:
+    from .test_flash_tree_sketch import CountSketch  # type: ignore
+    from .llama_model import LlamaModel
+except ImportError:  # Fallback when executed as a standalone script
+    from ring_attention_pytorch.count_min_sketch.test_flash_tree_sketch import CountSketch  # type: ignore
+    from ring_attention_pytorch.count_min_sketch.llama_model import LlamaModel
 
 def evaluate_model_layer_recovery(
     model_path: str | Path,
@@ -53,12 +64,31 @@ def evaluate_model_layer_recovery(
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}") # DEBUG
 
-    # Load tokenizer and model
+    # ------------------------------------------------------------------
+    # Load tokenizer and model (support both Meta original format and HF)
+    # ------------------------------------------------------------------
     print(f"Loading model from: {model_path}")
-    tokenizer = AutoTokenizer.from_pretrained(model_path)
-    model = LlamaModel(model_path)
+    tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
+
+    model: torch.nn.Module
+    original_format_ok = False
+    try:
+        # Attempt to load Meta original-format weights first (params.json etc.)
+        model = LlamaModel(model_path)  # type: ignore
+        original_format_ok = True
+    except (FileNotFoundError, OSError):
+        # Fallback: load Hugging Face-format checkpoint
+        print("Falling back to Hugging Face transformers model loading …")
+        hf_kwargs = {}
+        # If a dtype is specified, pass it directly to avoid large fp32 weights on CPU
+        if dtype is not None:
+            hf_kwargs["torch_dtype"] = dtype
+        hf_kwargs["trust_remote_code"] = True
+        model = AutoModelForCausalLM.from_pretrained(model_path, **hf_kwargs)  # type: ignore
+
+    # Move model to device / dtype where possible (AutoModel may already have correct dtype)
     model = model.to(device=device, dtype=dtype or torch.float16)
-    print(f"Model device after .to(): {next(model.parameters()).device}") # DEBUG
+    print(f"Model device after .to(): {next(model.parameters()).device}")  # DEBUG
     model.eval()
 
     # Prepare inputs
@@ -66,12 +96,19 @@ def evaluate_model_layer_recovery(
     input_ids = inputs["input_ids"].to(device)
     print(f"Input_ids device: {input_ids.device}") # DEBUG
 
+    # --------------------------------------------------------------
+    # Forward pass and capture hidden states (works for both models)
+    # --------------------------------------------------------------
     with torch.no_grad():
-        _ = model(input_ids)
+        try:
+            # Hugging Face models expose hidden_states when requested
+            outputs = model(input_ids, output_hidden_states=True, use_cache=False)
+            hidden_states = list(outputs.hidden_states)  # type: ignore
+        except TypeError:
+            # Our custom LlamaModel does not accept those kwargs
+            _ = model(input_ids)
+            hidden_states = model.hidden_states  # type: ignore
 
-    # Get hidden states from model
-    hidden_states = model.hidden_states  # List of tensors, one per layer
-    
     # Determine hidden dimension d from first hidden state tensor
     # shape: (batch, seq_len, hidden_dim)
     d = hidden_states[1].shape[-1]
