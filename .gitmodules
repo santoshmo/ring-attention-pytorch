@@ -1,0 +1,4 @@
+[submodule "third_party/flash-attention"]
+	path = third_party/flash-attention
+	url = git@github.com:santoshmo/flash-attention.git
+	branch = stats-rowmax-sumexp
